@@ -1,2 +1,2 @@
-# IoT-Pythin
-python code for light sensor
+# IoT-Python
+python code for IoT group project
