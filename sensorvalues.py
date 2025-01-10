@@ -40,6 +40,37 @@ def calculate_spo2(red_values, ir_values):
     spo2 = 104 - 17 * r_ratio 
     return max(0, min(100, round(spo2))) 
 
+"""
+    Detect sleep stage based on heart rate and SpO2 inputs.
+    Calculate sleep mode using heart rate and spo2
+
+    :param heart_rate_value
+    :param spo2_value
+    :return sleep mode (awake, deep sleep and light sleep) with relevant score
+"""
+
+def sleep_mode_detection(heart_rate_value, spo2_value):
+    thresholds_values = {
+        "LightSleep": {"bpm": (55, 75), "spo2": (92, 97)},
+        "DeepSleep": {"bpm": (40, 55), "spo2": (90, 96)},
+        "Awake": {"bpm": (75, float('inf')), "spo2": (93, 101)},
+    }
+
+    sleep_scores = {}
+
+    for sleep_mode, boundry_values in thresholds_values.items():
+        bpm_range = boundry_values["bpm"]
+        spo2_range = boundry_values["spo2"]
+
+        bpm_score = 1 if bpm_range[0] <= heart_rate_value <= bpm_range[1] else 0
+        spo2_score = 1 if spo2_range[0] <= spo2_value <= spo2_range[1] else 0
+
+        sleep_scores[sleep_mode] = bpm_score + spo2_score
+
+    result_mode = max(sleep_scores, key=sleep_scores.get)
+    return result_mode, sleep_scores
+
+
 # Function to detect when a finger is placed on the sensor
 # In here the threshold value is considered as 5000
 def is_finger_placed(ir_values):
@@ -48,31 +79,48 @@ def is_finger_placed(ir_values):
         return True
     return False
 
+# MQTT client callbacks
+def on_connect(rc):
+    print("Connected successfully to MQTT broker" if rc == 0 else f"Failed to connect with result code {rc}")
+
+def on_publish(mid):
+    print(f"Message published with ID: {mid}")
+
 # Function to publish the heart rate and SpO2 data via MQTT
-def publish_data_via_mqtt(heart_rate, spo2):
-    broker = "test.mosquitto.org"  # Broker address
-    port = 1883  # Broker port
-    topic = "sensor/data"  # MQTT topic
+def publish_data_via_mqtt(heart_rate, spo2, result_mode):
+    broker = "test.mosquitto.org"
+    port = 1883
+    topic = "sensor/data"
 
-    client = mqtt.Client(client_id=None, clean_session=True, userdata=None)
+    client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_publish = on_publish
 
-    client.connect(broker, port)
+    try:
+        client.connect(broker, port)
+        client.loop_start()
 
-    message = f"Heart Rate: {heart_rate} BPM, SpO2: {spo2}%"
-    client.publish(topic, message)
-    print(message)
+        message = f"Heart Rate: {heart_rate} BPM, SpO2: {spo2}%, Mode: {result_mode}"
+        client.publish(topic, message)
+        print(message)
 
-    client.disconnect()
+        client.loop_stop()
+        client.disconnect()
+    except Exception as e:
+        print(f"Error: {e}")
 
 # Function to simulate and publish the heart rate and SpO2 data
 def simulate_and_publish(red_values, ir_values):
     heart_rate = calculate_heart_rate(ir_values)
     spo2 = calculate_spo2(red_values, ir_values)
+    result_mode, score_details = sleep_mode_detection(heart_rate, spo2)
 
-    #print(f"Heart Rate from publisher: {heart_rate} BPM")
-    #print(f"SpO2from publisher: {spo2}%")
+    print(f"Heart Rate: {heart_rate} BPM")
+    print(f"SpO2: {spo2}%")
+    print(f"Sleep mode: {result_mode}")
+    print(f"Score value: {score_details}")
 
-    publish_data_via_mqtt(heart_rate, spo2)
+    publish_data_via_mqtt(heart_rate, spo2, result_mode)
 
 # Initialize the MAX30102 sensor
 sensor = MAX30102()
@@ -80,11 +128,11 @@ sensor = MAX30102()
 red_values = []
 ir_values = []
 
-# TODO: calculate the actual sample frequency. In here samples per second is consired as 100
+# In here samples per second is consired as 100
 sampling_frequency = 100  
 
-# Set a duration for capturing data (5 seconds)
-# Capture samples which has 5 seconds data
+# Set a duration for capturing data (35 seconds)
+# Capture samples which has 35 seconds data
 capture_duration = 5 
 capture_samples = capture_duration * sampling_frequency 
 
@@ -105,20 +153,20 @@ while True:
 
         # Check if a finger is placed on the sensor
         if is_finger_placed(ir_values) and not finger_detected:
-            print("Finger detected! Starting to capture data for 5 seconds.")
+            print("Finger detected! Starting to capture data for 35 seconds.")
             finger_detected = True
 
-            # Start collecting data for 5 seconds after detecting the finger
+            # Start collecting data for 35 seconds after detecting the finger
             start_time = time.time()
 
-        # Collect data for exactly 5 seconds after detecting the finger
+        # Collect data for exactly 35 seconds after detecting the finger
         if finger_detected:
-            # check no of seconds is <= capture duration which is 5
+            # check no of seconds is <= capture duration which is 35
             elapsed_time = time.time() - start_time
             if elapsed_time <= capture_duration:
                 pass
             else:
-                # After 5 seconds display resuls and calculate heart rate and spo2 values depend on the IR and RED buffer data
+                # After 35 seconds display resuls and calculate heart rate and spo2 values depend on the IR and RED buffer data
                 simulate_and_publish(red_values, ir_values)
                 print("Data collection complete.")
 
